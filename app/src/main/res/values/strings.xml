@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EditForge AI</string>
+    <string name="tagline">AI Audio &amp; Master Cut-Down Studio</string>
+    <string name="dashboard">Dashboard</string>
+    <string name="studio">Studio</string>
+    <string name="demos">Demos</string>
+    <string name="credits">Credits</string>
+    <string name="settings">Settings</string>
+    <string name="upload_track">Upload Master Track</string>
+    <string name="analyzing_track">Analyzing Structure &amp; Waveform...</string>
+    <string name="forge_deliverables">Forge Deliverables</string>
+    <string name="recent_projects">Recent Projects</string>
+    <string name="export_ready">Deliverables Ready</string>
+    <string name="credit_balance">Credit Balance</string>
+</resources>

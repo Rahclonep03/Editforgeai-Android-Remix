@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "sdk_version": "2.0.1",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://wwysaaotmpjdxhfmloik.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "edit-forge-ai",
+      "version": "0.1.0",
+      "title": "Edit Forge AI"
+    },
+    "tools": [
+      {
+        "name": "list_projects",
+        "title": "List projects",
+        "description": "List the signed-in user's EDITFORGE AI projects, newest first.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of projects to return (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_project",
+        "title": "Get project",
+        "description": "Get one EDITFORGE AI project with its audio analysis (BPM, key, genre, mood, energy, LUFS, structure) and its rendered deliverables.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "description": "The project UUID."
+            }
+          },
+          "required": [
+            "project_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_exports",
+        "title": "List deliverables",
+        "description": "List the signed-in user's rendered audio deliverables (60s/30s/15s edits, stings, custom edits) across all projects, newest first.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "description": "Optional project UUID to filter by."
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "processing",
+                "complete",
+                "failed"
+              ],
+              "description": "Optional status filter."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum rows to return (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_export_download_url",
+        "title": "Get deliverable download link",
+        "description": "Create a temporary (10 minute) download link for one completed EDITFORGE AI audio deliverable.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "export_id": {
+              "type": "string",
+              "description": "The export UUID."
+            }
+          },
+          "required": [
+            "export_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "rename_project",
+        "title": "Rename project",
+        "description": "Rename one of the signed-in user's EDITFORGE AI projects.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "description": "The project UUID."
+            },
+            "project_name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The new project name."
+            }
+          },
+          "required": [
+            "project_id",
+            "project_name"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
