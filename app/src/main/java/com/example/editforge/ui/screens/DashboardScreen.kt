@@ -1,6 +1,7 @@
 package com.example.editforge.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,15 +20,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.editforge.data.model.Project
 import com.example.editforge.data.model.ProjectStatus
+import com.example.editforge.ui.components.AudioAmplitudeWaveformCanvas
 import com.example.editforge.ui.components.AudioUploadMasteringCard
 import com.example.editforge.ui.components.AuthHeaderBadge
 import com.example.editforge.ui.components.AuthProfileDialog
@@ -40,11 +44,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class ProjectFilter(val label: String) {
+enum class ActiveProjectFilter(val label: String) {
     ALL("All Tracks"),
-    COMPLETE("Ready"),
-    PROCESSING("In Progress"),
-    BUNDLE("Bundle Unlocked")
+    ACTIVE("Active Editing"),
+    ANALYZING("Ingest / DSP"),
+    GENERATING("Stems / Processing"),
+    READY("Ready for Cuts"),
+    COMPLETE("Mastered")
 }
 
 @Composable
@@ -63,6 +69,8 @@ fun DashboardScreen(
     val analysisStageText by viewModel.analysisStageText.collectAsState()
     val currentUser by viewModel.currentUserState.collectAsState()
     val isCloudSyncing by viewModel.isCloudSyncing.collectAsState()
+    val isFetchingFirestore by viewModel.isFetchingFirestore.collectAsState()
+    val firestoreLastSyncTime by viewModel.firestoreLastSyncTime.collectAsState()
     val cloudSyncStateText by viewModel.cloudSyncStateText.collectAsState()
     val authError by viewModel.authError.collectAsState()
     val isAuthLoading by viewModel.isAuthLoading.collectAsState()
@@ -74,9 +82,22 @@ fun DashboardScreen(
 
     var showAuthDialog by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf(ProjectFilter.ALL) }
+    var selectedFilter by remember { mutableStateOf(ActiveProjectFilter.ALL) }
     var projectToDelete by remember { mutableStateOf<Project?>(null) }
     var showQuickUploader by remember { mutableStateOf(false) }
+    var showNewCloudProjectDialog by remember { mutableStateOf(false) }
+
+    // Spinning animation for refresh button
+    val infiniteTransition = rememberInfiniteTransition(label = "refresh_spin")
+    val spinAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "spin_angle"
+    )
 
     if (showAuthDialog) {
         AuthProfileDialog(
@@ -90,7 +111,7 @@ fun DashboardScreen(
             onSignInWithEmail = { email, pass -> viewModel.signInWithEmail(email, pass) },
             onCreateAccountWithEmail = { email, pass -> viewModel.createAccountWithEmail(email, pass) },
             onSignOut = { viewModel.signOut() },
-            onSyncNow = { viewModel.syncAllToCloudNow() },
+            onSyncNow = { viewModel.fetchActiveProjectsFromFirestore(force = true) },
             onClearError = { viewModel.clearAuthError() }
         )
     }
@@ -101,14 +122,14 @@ fun DashboardScreen(
             onDismissRequest = { projectToDelete = null },
             title = {
                 Text(
-                    text = "Delete Project?",
+                    text = "Delete Audio Project?",
                     fontWeight = FontWeight.Bold,
                     color = studioColors.textPrimary
                 )
             },
             text = {
                 Text(
-                    text = "Are you sure you want to delete \"${projectToDelete?.projectName}\"? All generated cut-down exports and stems will be removed.",
+                    text = "Are you sure you want to remove \"${projectToDelete?.projectName}\" from your studio and Firestore cloud storage?",
                     color = studioColors.textSecondary,
                     fontSize = 13.sp
                 )
@@ -124,7 +145,7 @@ fun DashboardScreen(
                         contentColor = studioColors.onPrimary
                     )
                 ) {
-                    Text("Delete Track")
+                    Text("Delete Project")
                 }
             },
             dismissButton = {
@@ -137,7 +158,98 @@ fun DashboardScreen(
         )
     }
 
-    // Filter projects based on search query and filter chips
+    // Quick New Cloud Audio Project Dialog
+    if (showNewCloudProjectDialog) {
+        var trackName by remember { mutableStateOf("Cybernetic Groove - Studio Master") }
+        var audioFileName by remember { mutableStateOf("Cybernetic Groove.wav") }
+        var selectedStatus by remember { mutableStateOf(ProjectStatus.ANALYZING) }
+
+        AlertDialog(
+            onDismissRequest = { showNewCloudProjectDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CloudUpload,
+                        contentDescription = null,
+                        tint = studioColors.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "New Cloud Audio Project",
+                        fontWeight = FontWeight.Bold,
+                        color = studioColors.textPrimary,
+                        fontSize = 17.sp
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Creates and registers an active audio session directly in Firestore for real-time cut-down forging.",
+                        fontSize = 12.sp,
+                        color = studioColors.textSecondary
+                    )
+                    OutlinedTextField(
+                        value = trackName,
+                        onValueChange = { trackName = it },
+                        label = { Text("Track Title") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = studioColors.primary,
+                            unfocusedBorderColor = studioColors.border,
+                            focusedTextColor = studioColors.textPrimary,
+                            unfocusedTextColor = studioColors.textPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = audioFileName,
+                        onValueChange = { audioFileName = it },
+                        label = { Text("Master Audio File") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = studioColors.primary,
+                            unfocusedBorderColor = studioColors.border,
+                            focusedTextColor = studioColors.textPrimary,
+                            unfocusedTextColor = studioColors.textPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (trackName.isNotBlank()) {
+                            viewModel.createCloudAudioProject(
+                                name = trackName.trim(),
+                                fileName = audioFileName.trim(),
+                                duration = 195f,
+                                status = selectedStatus
+                            )
+                        }
+                        showNewCloudProjectDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = studioColors.primary,
+                        contentColor = studioColors.onPrimary
+                    )
+                ) {
+                    Text("Ingest to Firestore")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showNewCloudProjectDialog = false }) {
+                    Text("Cancel", color = studioColors.textSecondary)
+                }
+            },
+            containerColor = studioColors.surface,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Filter projects based on search query and active status
     val filteredProjects = remember(projects, searchQuery, selectedFilter) {
         projects.filter { project ->
             val matchesSearch = searchQuery.isBlank() ||
@@ -145,20 +257,27 @@ fun DashboardScreen(
                     project.fileName.contains(searchQuery, ignoreCase = true)
 
             val matchesFilter = when (selectedFilter) {
-                ProjectFilter.ALL -> true
-                ProjectFilter.COMPLETE -> project.status == ProjectStatus.COMPLETE || project.status == ProjectStatus.ANALYZED
-                ProjectFilter.PROCESSING -> project.status == ProjectStatus.ANALYZING || project.status == ProjectStatus.GENERATING
-                ProjectFilter.BUNDLE -> project.coreBundleUnlocked
+                ActiveProjectFilter.ALL -> true
+                ActiveProjectFilter.ACTIVE -> project.status == ProjectStatus.ANALYZING ||
+                        project.status == ProjectStatus.GENERATING ||
+                        project.status == ProjectStatus.ANALYZED
+                ActiveProjectFilter.ANALYZING -> project.status == ProjectStatus.ANALYZING || project.status == ProjectStatus.UPLOADED
+                ActiveProjectFilter.GENERATING -> project.status == ProjectStatus.GENERATING
+                ActiveProjectFilter.READY -> project.status == ProjectStatus.ANALYZED
+                ActiveProjectFilter.COMPLETE -> project.status == ProjectStatus.COMPLETE
             }
 
             matchesSearch && matchesFilter
         }
     }
 
-    val readyCount = projects.count { it.status == ProjectStatus.COMPLETE || it.status == ProjectStatus.ANALYZED }
-    val processingCount = projects.count {
-        it.status == ProjectStatus.ANALYZING || it.status == ProjectStatus.GENERATING
+    val activeEditingCount = projects.count {
+        it.status == ProjectStatus.ANALYZING ||
+                it.status == ProjectStatus.GENERATING ||
+                it.status == ProjectStatus.ANALYZED
     }
+    val readyCount = projects.count { it.status == ProjectStatus.COMPLETE }
+    val isAnySyncing = isFetchingFirestore || isCloudSyncing
 
     LazyColumn(
         modifier = modifier
@@ -166,9 +285,9 @@ fun DashboardScreen(
             .background(studioColors.background)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 90.dp)
+        contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp)
     ) {
-        // 1. Studio Dashboard Hero Header
+        // 1. Studio Dashboard Hero Header & Cloud Connection Banner
         item {
             Box(
                 modifier = Modifier
@@ -176,14 +295,19 @@ fun DashboardScreen(
                     .clip(RoundedCornerShape(16.dp))
                     .background(
                         Brush.linearGradient(
-                            listOf(studioColors.primaryContainer.copy(alpha = 0.5f), studioColors.surface, studioColors.background)
+                            listOf(
+                                studioColors.primaryContainer.copy(alpha = 0.45f),
+                                studioColors.surface,
+                                studioColors.background
+                            )
                         )
                     )
                     .border(1.dp, studioColors.border, RoundedCornerShape(16.dp))
                     .padding(18.dp)
                     .testTag("dashboard_hero_card")
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // Top Row: Title + Firestore Live Status & Auth
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -191,24 +315,26 @@ fun DashboardScreen(
                     ) {
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Live pulsing dot
                                 Box(
                                     modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(RoundedCornerShape(5.dp))
-                                        .background(studioColors.primary)
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isAnySyncing) studioColors.secondary else studioColors.primary)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "EDITFORGE AI STUDIO",
+                                    text = if (isAnySyncing) "FETCHING FIRESTORE..." else "FIRESTORE CLOUD ACTIVE",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = studioColors.secondary,
+                                    color = if (isAnySyncing) studioColors.secondary else studioColors.primary,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
                                 )
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Audio Project Manager",
+                                text = "Audio Editing Projects",
                                 style = MaterialTheme.typography.headlineMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = studioColors.textPrimary
@@ -219,60 +345,149 @@ fun DashboardScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            AuthHeaderBadge(
-                                userProfile = currentUser,
-                                isSyncing = isCloudSyncing,
-                                onClick = { showAuthDialog = true }
-                            )
-
-                            Button(
-                                onClick = onNavigateUpload,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = studioColors.primary,
-                                    contentColor = studioColors.onPrimary
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                                modifier = Modifier.testTag("dashboard_new_upload_button")
+                            // Firestore Re-fetch button with spinning feedback
+                            IconButton(
+                                onClick = { viewModel.fetchActiveProjectsFromFirestore(force = true) },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(studioColors.surfaceElevated)
+                                    .border(1.dp, studioColors.border, CircleShape)
+                                    .testTag("firestore_refresh_button")
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.CloudUpload,
-                                    contentDescription = "Upload Track",
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "New Track",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Fetch latest from Firestore",
+                                    tint = if (isAnySyncing) studioColors.primary else studioColors.textPrimary,
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .rotate(if (isAnySyncing) spinAngle else 0f)
                                 )
                             }
+
+                            AuthHeaderBadge(
+                                userProfile = currentUser,
+                                isSyncing = isAnySyncing,
+                                onClick = { showAuthDialog = true }
+                            )
                         }
                     }
 
-                    Text(
-                        text = "Real-time overview of mastered audio tracks, multi-format cut-downs (60s, 30s, 15s, stings), and GPU stem exports.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = studioColors.textSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
+                    // Firestore Status Strip
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(studioColors.surfaceElevated.copy(alpha = 0.7f))
+                            .border(1.dp, studioColors.border.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudQueue,
+                                    contentDescription = "Cloud Source",
+                                    tint = studioColors.secondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isAnySyncing) "Syncing with Google Firestore..." else "${projects.size} active tracks synced with Firestore",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = studioColors.textPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            val lastSyncStr = remember(firestoreLastSyncTime) {
+                                firestoreLastSyncTime?.let {
+                                    SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(it))
+                                } ?: "Live"
+                            }
+                            Text(
+                                text = "Updated $lastSyncStr",
+                                fontSize = 10.sp,
+                                color = studioColors.textTertiary
+                            )
+                        }
+                    }
+
+                    // Action CTAs: Ingest Master Track & Quick Ingest to Cloud
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = onNavigateUpload,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = studioColors.primary,
+                                contentColor = studioColors.onPrimary
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .testTag("dashboard_upload_master_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Upload Master Track",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { showNewCloudProjectDialog = true },
+                            border = BorderStroke(1.dp, studioColors.border),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = studioColors.surface
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("dashboard_quick_add_cloud_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = studioColors.secondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Add Track",
+                                color = studioColors.textPrimary,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        // 2. Metrics Overview Row
+        // 2. Metrics Row
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 MetricCard(
-                    label = "Total Projects",
+                    label = "Active Projects",
                     value = "${projects.size}",
                     icon = Icons.Default.GraphicEq,
                     modifier = Modifier.weight(1f),
-                    subValue = "$readyCount Ready"
+                    subValue = "$activeEditingCount in editing"
                 )
                 MetricCard(
                     label = "Rendered Cuts",
@@ -282,7 +497,7 @@ fun DashboardScreen(
                     subValue = "WAV / MP3"
                 )
                 MetricCard(
-                    label = "Credits Balance",
+                    label = "Studio Credits",
                     value = "$creditBalance",
                     icon = Icons.Default.Token,
                     modifier = Modifier.weight(1f),
@@ -291,7 +506,7 @@ fun DashboardScreen(
             }
         }
 
-        // 3. Quick Audio Upload / Analysis Toggle Card
+        // 3. Quick Audio Upload / Mastering Workbench Toggle
         item {
             Box(
                 modifier = Modifier
@@ -318,7 +533,7 @@ fun DashboardScreen(
                         ) {
                             Icon(
                                 imageVector = if (showQuickUploader) Icons.Default.ExpandLess else Icons.Default.Bolt,
-                                contentDescription = "Quick Audio Mastering",
+                                contentDescription = "Quick Audio Ingest",
                                 tint = studioColors.primary,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -326,13 +541,13 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Quick Master & DSP Engine",
+                                text = "Quick Master & Cut-Down Workbench",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = studioColors.textPrimary
                             )
                             Text(
-                                text = if (showQuickUploader) "Tap to collapse quick mastering workbench" else "Tap to ingest audio directly from your dashboard",
+                                text = if (showQuickUploader) "Tap to collapse quick workbench" else "Ingest master audio directly & sync to Firestore",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = studioColors.textSecondary,
                                 fontSize = 11.sp
@@ -368,7 +583,7 @@ fun DashboardScreen(
             }
         }
 
-        // 4. Showcase Demos Navigation Card
+        // 4. Showcase Demos Banner
         item {
             Box(
                 modifier = Modifier
@@ -401,13 +616,13 @@ fun DashboardScreen(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Audition Studio Cut-Down Demos",
+                            text = "Audition Broadcast Cut-Down Demos",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = studioColors.textPrimary
                         )
                         Text(
-                            text = "Listen to side-by-side 60s, 30s hook, and 15s social edits.",
+                            text = "A/B compare 60s radio cuts, 30s hooks, 15s reels, and Demucs stems.",
                             style = MaterialTheme.typography.bodySmall,
                             color = studioColors.textSecondary,
                             fontSize = 11.sp
@@ -432,7 +647,7 @@ fun DashboardScreen(
                     onValueChange = { searchQuery = it },
                     placeholder = {
                         Text(
-                            text = "Search projects by title or audio file...",
+                            text = "Search active projects or audio files...",
                             color = studioColors.textTertiary,
                             fontSize = 13.sp
                         )
@@ -477,13 +692,15 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(ProjectFilter.entries) { filter ->
+                    items(ActiveProjectFilter.entries) { filter ->
                         val isSelected = selectedFilter == filter
                         val count = when (filter) {
-                            ProjectFilter.ALL -> projects.size
-                            ProjectFilter.COMPLETE -> readyCount
-                            ProjectFilter.PROCESSING -> processingCount
-                            ProjectFilter.BUNDLE -> projects.count { it.coreBundleUnlocked }
+                            ActiveProjectFilter.ALL -> projects.size
+                            ActiveProjectFilter.ACTIVE -> activeEditingCount
+                            ActiveProjectFilter.ANALYZING -> projects.count { it.status == ProjectStatus.ANALYZING || it.status == ProjectStatus.UPLOADED }
+                            ActiveProjectFilter.GENERATING -> projects.count { it.status == ProjectStatus.GENERATING }
+                            ActiveProjectFilter.READY -> projects.count { it.status == ProjectStatus.ANALYZED }
+                            ActiveProjectFilter.COMPLETE -> readyCount
                         }
 
                         FilterChip(
@@ -524,7 +741,7 @@ fun DashboardScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Recent Audio Projects",
+                        text = "Active Firestore Projects",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = studioColors.textPrimary
@@ -546,7 +763,7 @@ fun DashboardScreen(
 
                 if (filteredProjects.isNotEmpty()) {
                     Text(
-                        text = "Tap card to open studio",
+                        text = "Tap to open studio",
                         style = MaterialTheme.typography.bodySmall,
                         color = studioColors.textSecondary,
                         fontSize = 11.sp
@@ -555,7 +772,7 @@ fun DashboardScreen(
             }
         }
 
-        // 7. Recent Audio Project Cards List
+        // 7. Active Audio Editing Project Cards
         if (filteredProjects.isEmpty()) {
             item {
                 Box(
@@ -569,39 +786,57 @@ fun DashboardScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector = if (searchQuery.isNotEmpty()) Icons.Default.SearchOff else Icons.Default.FolderOpen,
+                            imageVector = if (searchQuery.isNotEmpty()) Icons.Default.SearchOff else Icons.Default.CloudQueue,
                             contentDescription = "No projects",
                             tint = studioColors.textTertiary,
                             modifier = Modifier.size(48.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = if (searchQuery.isNotEmpty()) "No matching audio tracks" else "No audio projects yet",
+                            text = if (searchQuery.isNotEmpty()) "No matching audio tracks" else "No active projects in Firestore",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = studioColors.textPrimary
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = if (searchQuery.isNotEmpty()) "Try changing your search terms or filter selection." else "Upload your master WAV or MP3 audio track to automatically detect song structure, tempo, key, and forge broadcast-ready cutdowns.",
+                            text = if (searchQuery.isNotEmpty())
+                                "Try changing your search terms or filter selection."
+                            else
+                                "Fetch your audio tracks from Firestore cloud storage or ingest a master WAV/MP3 track to begin.",
                             style = MaterialTheme.typography.bodySmall,
                             color = studioColors.textSecondary,
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = onNavigateUpload,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = studioColors.primary,
-                                contentColor = studioColors.onPrimary
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Upload Master Track")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { viewModel.fetchActiveProjectsFromFirestore(force = true) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = studioColors.secondary,
+                                    contentColor = studioColors.onSecondary
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Sync from Firestore")
+                            }
+
+                            Button(
+                                onClick = onNavigateUpload,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = studioColors.primary,
+                                    contentColor = studioColors.onPrimary
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Upload Master Track")
+                            }
                         }
                     }
                 }
@@ -611,7 +846,7 @@ fun DashboardScreen(
                 val projectExports = allExports.filter { it.projectId == project.id }
                 val isCurrentPlaying = playingId == project.id && isPlaying
 
-                AudioProjectCard(
+                ActiveAudioProjectCard(
                     project = project,
                     exportsCount = projectExports.size,
                     isPlaying = isCurrentPlaying,
@@ -626,16 +861,16 @@ fun DashboardScreen(
 }
 
 /**
- * Prominent, rich audio project card displaying metadata:
+ * Rich, responsive card representing an active audio editing project fetched from Firestore:
  * - Title & original filename
- * - Duration & file size
- * - Processed status badge (Complete, Analyzing, Generating, Failed)
- * - Associated rendered exports count
- * - Core Deliverable Bundle status
- * - Quick in-card playback preview & navigation
+ * - Active editing pipeline status (Ingesting, Analyzing, Demucs GPU Stem Separation, Deliverables Ready)
+ * - Firestore Cloud Sync pill badge
+ * - Musical specs (Duration, File Size, Retention countdown, Cuts count)
+ * - Real-time playback waveform preview
+ * - Quick Studio CTA and Delete action
  */
 @Composable
-fun AudioProjectCard(
+fun ActiveAudioProjectCard(
     project: Project,
     exportsCount: Int,
     isPlaying: Boolean,
@@ -650,6 +885,10 @@ fun AudioProjectCard(
         SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(project.createdAt))
     }
 
+    val isActiveEditing = project.status == ProjectStatus.ANALYZING ||
+            project.status == ProjectStatus.GENERATING ||
+            project.status == ProjectStatus.UPLOADED
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -659,8 +898,8 @@ fun AudioProjectCard(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = studioColors.surface),
         border = BorderStroke(
-            width = if (isPlaying) 1.5.dp else 1.dp,
-            color = if (isPlaying) studioColors.primary else studioColors.border
+            width = if (isPlaying) 1.5.dp else if (isActiveEditing) 1.2.dp else 1.dp,
+            color = if (isPlaying) studioColors.primary else if (isActiveEditing) studioColors.secondary.copy(alpha = 0.8f) else studioColors.border
         )
     ) {
         Column(
@@ -669,7 +908,7 @@ fun AudioProjectCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 1. Header: Status Icon, Title, Duration & Status Badge
+            // 1. Header: Icon, Title, Filename & Firestore Cloud Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -679,7 +918,6 @@ fun AudioProjectCard(
                     verticalAlignment = Alignment.Top,
                     modifier = Modifier.weight(1f)
                 ) {
-                    // Audio waveform icon badge with pulse animation when playing
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -695,9 +933,13 @@ fun AudioProjectCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isPlaying) Icons.Default.GraphicEq else Icons.Default.Audiotrack,
+                            imageVector = when (project.status) {
+                                ProjectStatus.ANALYZING -> Icons.Default.HourglassTop
+                                ProjectStatus.GENERATING -> Icons.Default.Autorenew
+                                else -> if (isPlaying) Icons.Default.GraphicEq else Icons.Default.Audiotrack
+                            },
                             contentDescription = "Track Icon",
-                            tint = if (isPlaying) studioColors.primary else studioColors.secondary,
+                            tint = if (isPlaying) studioColors.primary else if (isActiveEditing) studioColors.secondary else studioColors.textSecondary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -727,11 +969,84 @@ fun AudioProjectCard(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Status Badge (Complete, Analyzing, Generating, Failed, etc.)
-                StatusBadge(status = project.status)
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Firestore Cloud Badge
+                    Box(
+                        modifier = Modifier
+                            .background(studioColors.primary.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                            .border(1.dp, studioColors.primary.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDone,
+                                contentDescription = "Firestore Cloud Synced",
+                                tint = studioColors.primary,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "Firestore",
+                                color = studioColors.primary,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Project Status Badge
+                    StatusBadge(status = project.status)
+                }
             }
 
-            // 2. Metadata Chips Row: Duration, File Size, Created Date, Deliverable Cuts
+            // 2. Active Audio Editing Pipeline Status Indicator (when processing/analyzing)
+            if (isActiveEditing) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(studioColors.surfaceElevated)
+                        .border(1.dp, studioColors.secondary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                strokeWidth = 2.dp,
+                                color = studioColors.secondary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = when (project.status) {
+                                    ProjectStatus.ANALYZING -> "Audio DSP: Transient & Key Profile Analysis"
+                                    ProjectStatus.GENERATING -> "Active Editing: GPU Stem Extraction & Cut-Downs"
+                                    else -> "Ingesting Master Track..."
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = studioColors.secondary
+                            )
+                        }
+
+                        Text(
+                            text = "In Progress",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = studioColors.secondary
+                        )
+                    }
+                }
+            }
+
+            // 3. Audio Metadata Chips: Duration, File Size, Created Date, Deliverable Cuts
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -814,7 +1129,7 @@ fun AudioProjectCard(
                 }
             }
 
-            // 3. Audio Playback Progress Indicator (Visible when playing)
+            // 4. Audio Playback Progress Bar (Visible when playing)
             AnimatedVisibility(visible = isPlaying) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     LinearProgressIndicator(
@@ -846,7 +1161,7 @@ fun AudioProjectCard(
 
             HorizontalDivider(color = studioColors.border, thickness = 0.8.dp)
 
-            // 4. Card Bottom Actions: Timestamp, Preview Player Button, Open Studio & Delete
+            // 5. Card Bottom Actions: Timestamp, Preview Player Button, Open Studio & Delete
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

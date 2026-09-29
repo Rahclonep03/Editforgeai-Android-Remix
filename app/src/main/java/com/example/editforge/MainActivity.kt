@@ -162,7 +162,13 @@ fun MainAppScreen(viewModel: EditForgeViewModel = viewModel()) {
                         },
                         onNavigateDemos = { currentTab = NavigationTab.DEMOS }
                     )
-                    NavigationTab.DEMOS -> DemosScreen(viewModel = viewModel)
+                    NavigationTab.DEMOS -> DemosScreen(
+                        viewModel = viewModel,
+                        onNavigateProject = { id ->
+                            viewModel.selectProject(id)
+                            viewingProjectId = id
+                        }
+                    )
                     NavigationTab.BILLING -> SubscriptionScreen(viewModel = viewModel)
                     NavigationTab.SETTINGS -> SettingsScreen(viewModel = viewModel)
                 }
@@ -182,10 +188,13 @@ fun MiniPlayerBar(
 ) {
     val studioColors = StudioTheme.colors
     val displayTitle = when {
-        playingId.contains("neon") -> "Neon Horizons - Studio Master"
-        playingId == "edit-60" -> "Demo: 60s Radio Cut"
-        playingId == "edit-30" -> "Demo: 30s Hook Cut"
-        playingId == "edit-15" -> "Demo: 15s Social Cut"
+        playingId.contains("cybernetic") -> "Cybernetic Groove - Studio Master"
+        playingId.contains("neon") -> "Cybernetic Groove - Studio Master"
+        playingId == "edit-60" -> "Cybernetic Groove (60s Radio Cut)"
+        playingId == "edit-30" -> "Cybernetic Groove (30s Hook Cut)"
+        playingId == "edit-15" -> "Cybernetic Groove (15s Social Cut)"
+        playingId == "edit-sting" -> "Cybernetic Groove (5s Sting)"
+        playingId == "edit-stems" -> "Cybernetic Groove (Demucs Stems)"
         else -> "Master Track Playback"
     }
 

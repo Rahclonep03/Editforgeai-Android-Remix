@@ -1,11 +1,13 @@
 package com.example.editforge
 
+import com.example.editforge.data.model.AudioDemosData
 import com.example.editforge.data.model.DeliverableType
 import com.example.editforge.data.model.ProjectStatus
 import com.example.editforge.data.model.SubscriptionTier
 import com.example.editforge.data.paddle.BillingCycle
 import com.example.editforge.data.paddle.PaddleBillingService
 import com.example.editforge.data.paddle.SubscriptionStatus
+import com.example.editforge.ui.components.DASHBOARD_AUDIO_PRESETS
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -13,6 +15,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditForgeUnitTest {
+
+    @Test
+    fun testCyberneticGrooveDemoTrack() {
+        val master = AudioDemosData.MASTER_TRACK
+        assertNotNull(master)
+        assertTrue(master.title.contains("Cybernetic Groove.wav"))
+        assertEquals(150.0f, master.duration, 0.01f)
+        assertEquals("2:30", master.durationLabel)
+        assertTrue(master.peaks.isNotEmpty())
+
+        val demos = AudioDemosData.DEMOS
+        assertEquals(5, demos.size)
+        assertTrue(demos.any { it.id == "edit-60" && it.title.contains("Cybernetic Groove") })
+        assertTrue(demos.any { it.id == "edit-30" && it.title.contains("Cybernetic Groove") })
+        assertTrue(demos.any { it.id == "edit-15" && it.title.contains("Cybernetic Groove") })
+        assertTrue(demos.any { it.id == "edit-sting" })
+        assertTrue(demos.any { it.id == "edit-stems" })
+
+        val defaultPreset = DASHBOARD_AUDIO_PRESETS.first()
+        assertEquals("Cybernetic Groove.wav", defaultPreset.fileName)
+        assertEquals(150.0f, defaultPreset.durationSeconds, 0.01f)
+    }
 
     @Test
     fun testDeliverablePricing() {

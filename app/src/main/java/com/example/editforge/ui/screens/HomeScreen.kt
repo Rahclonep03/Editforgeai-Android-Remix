@@ -382,7 +382,7 @@ fun HomeScreen(
                     )
                     QuickActionTile(
                         title = "Cut-Down Demos",
-                        subtitle = "60s, 30s & 15s Edits",
+                        subtitle = "Cybernetic Groove · 2:30",
                         icon = Icons.Default.MusicNote,
                         accentColor = ForgeWaveformViolet,
                         modifier = Modifier.weight(1f),

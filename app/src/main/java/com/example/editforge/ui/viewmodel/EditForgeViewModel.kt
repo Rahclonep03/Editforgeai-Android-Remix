@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.editforge.data.audio.CyberneticAudioEngine
 import com.example.editforge.data.firebase.AuthResult
 import com.example.editforge.data.firebase.FirebaseAuthService
 import com.example.editforge.data.firebase.FirebaseFirestoreService
@@ -101,6 +102,18 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
     private val _isCloudSyncing = MutableStateFlow(false)
     val isCloudSyncing: StateFlow<Boolean> = _isCloudSyncing.asStateFlow()
 
+    private val _isFetchingFirestore = MutableStateFlow(false)
+    val isFetchingFirestore: StateFlow<Boolean> = _isFetchingFirestore.asStateFlow()
+
+    private val _firestoreLastSyncTime = MutableStateFlow<Long?>(null)
+    val firestoreLastSyncTime: StateFlow<Long?> = _firestoreLastSyncTime.asStateFlow()
+
+    private val _firestoreProjectCount = MutableStateFlow(0)
+    val firestoreProjectCount: StateFlow<Int> = _firestoreProjectCount.asStateFlow()
+
+    private val _firestoreConnected = MutableStateFlow(true)
+    val firestoreConnected: StateFlow<Boolean> = _firestoreConnected.asStateFlow()
+
     private val _cloudSyncStateText = MutableStateFlow("Firestore Connected")
     val cloudSyncStateText: StateFlow<String> = _cloudSyncStateText.asStateFlow()
 
@@ -164,6 +177,9 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
 
+        // Initial fetch from Firestore
+        fetchActiveProjectsFromFirestore()
+
         // Real-time Firestore sync & user profile backup
         viewModelScope.launch {
             currentUserState.collect { user ->
@@ -174,9 +190,46 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
                         email = user.email,
                         displayName = user.displayName
                     )
-                    syncAllToCloudNow()
+                    fetchActiveProjectsFromFirestore()
                 }
             }
+        }
+    }
+
+    fun fetchActiveProjectsFromFirestore(force: Boolean = false) {
+        viewModelScope.launch {
+            val uid = authService.currentUserId
+            _isFetchingFirestore.value = true
+            _cloudSyncStateText.value = "Fetching from Firestore..."
+            try {
+                val cloudProjects = firestoreService.fetchCloudProjects(uid)
+                if (cloudProjects.isNotEmpty()) {
+                    repository.insertOrUpdateProjects(cloudProjects)
+                    _firestoreProjectCount.value = cloudProjects.size
+                    _firestoreLastSyncTime.value = System.currentTimeMillis()
+                    _cloudSyncStateText.value = "Firestore Synced (${cloudProjects.size} tracks)"
+                    _firestoreConnected.value = true
+                }
+            } catch (e: Exception) {
+                Log.w("EditForgeViewModel", "Firestore fetch error, fallback active: ${e.message}")
+                _cloudSyncStateText.value = "Offline Cache Active"
+            } finally {
+                _isFetchingFirestore.value = false
+            }
+        }
+    }
+
+    fun createCloudAudioProject(
+        name: String,
+        fileName: String,
+        duration: Float,
+        status: ProjectStatus = ProjectStatus.ANALYZING
+    ) {
+        viewModelScope.launch {
+            val newProject = repository.createProject(name, fileName, duration)
+            val uid = authService.currentUserId
+            firestoreService.syncProjectToCloud(uid, newProject.copy(status = status))
+            fetchActiveProjectsFromFirestore(force = true)
         }
     }
 
@@ -217,7 +270,9 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun signOut() {
-        authService.signOut()
+        viewModelScope.launch {
+            authService.signOut()
+        }
     }
 
     fun clearAuthError() {
@@ -403,17 +458,24 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
     fun stopPlayback() {
         _isPlaying.value = false
         _playbackProgress.value = 0f
+        CyberneticAudioEngine.stop()
         playbackJob?.cancel()
     }
 
     fun seekTo(progress: Float) {
-        _playbackProgress.value = progress.coerceIn(0f, 1f)
+        val clamped = progress.coerceIn(0f, 1f)
+        _playbackProgress.value = clamped
+        if (_isPlaying.value) {
+            CyberneticAudioEngine.start(currentTrackDuration, clamped)
+        }
     }
 
     private fun startPlayback(id: String, duration: Float) {
         _playingId.value = id
         currentTrackDuration = duration.coerceAtLeast(1f)
         _isPlaying.value = true
+
+        CyberneticAudioEngine.start(currentTrackDuration, _playbackProgress.value)
 
         playbackJob?.cancel()
         playbackJob = viewModelScope.launch {
@@ -426,6 +488,7 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
                 if (next >= 1.0f) {
                     _playbackProgress.value = 0f
                     _isPlaying.value = false
+                    CyberneticAudioEngine.stop()
                     break
                 } else {
                     _playbackProgress.value = next
@@ -436,6 +499,7 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun pausePlayback() {
         _isPlaying.value = false
+        CyberneticAudioEngine.stop()
         playbackJob?.cancel()
     }
 
@@ -474,6 +538,7 @@ class EditForgeViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         super.onCleared()
+        CyberneticAudioEngine.stop()
         playbackJob?.cancel()
     }
 }

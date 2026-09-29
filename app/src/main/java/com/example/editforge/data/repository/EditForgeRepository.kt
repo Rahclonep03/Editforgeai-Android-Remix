@@ -239,6 +239,24 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
         )
     }
 
+    suspend fun insertOrUpdateProjects(projects: List<Project>) {
+        val entities = projects.map { proj ->
+            ProjectEntity(
+                id = proj.id,
+                projectName = proj.projectName,
+                fileName = proj.fileName,
+                fileSize = proj.fileSize,
+                duration = proj.duration,
+                status = proj.status.name,
+                expiresAt = proj.expiresAt,
+                coreBundleUnlocked = proj.coreBundleUnlocked,
+                bundleAlternatesUsed = proj.bundleAlternatesUsed,
+                createdAt = proj.createdAt
+            )
+        }
+        projectDao.insertProjects(entities)
+    }
+
     suspend fun deleteProject(projectId: String) {
         exportDao.deleteExportsForProject(projectId)
         projectDao.deleteProjectById(projectId)
@@ -281,7 +299,7 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
     }
 
     private suspend fun seedDefaultDataIfNeeded() {
-        val project1Id = "demo-project-neon-horizons"
+        val project1Id = "demo-project-cybernetic-groove"
         val existing = projectDao.getProjectById(project1Id)
         if (existing == null) {
             val now = System.currentTimeMillis()
@@ -290,10 +308,10 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
             projectDao.insertProject(
                 ProjectEntity(
                     id = project1Id,
-                    projectName = "Neon Horizons - Studio Master",
-                    fileName = "neon_horizons_master_24bit_48k.wav",
-                    fileSize = 42_500_000L,
-                    duration = 214.5f,
+                    projectName = "Cybernetic Groove - Studio Master",
+                    fileName = "Cybernetic Groove.wav",
+                    fileSize = 44_100_000L,
+                    duration = 150.0f,
                     status = ProjectStatus.COMPLETE.name,
                     expiresAt = expiry,
                     coreBundleUnlocked = true,
@@ -303,37 +321,37 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
             )
 
             val structure = listOf(
-                StructureSection("Intro", 0f, 24.5f, 0.95f),
-                StructureSection("Verse", 24.5f, 78.0f, 0.92f),
-                StructureSection("Chorus", 78.0f, 134.5f, 0.98f),
-                StructureSection("Bridge", 134.5f, 172.0f, 0.89f),
-                StructureSection("Outro", 172.0f, 214.5f, 0.96f)
+                StructureSection("Intro", 0f, 16.0f, 0.96f),
+                StructureSection("Verse", 16.0f, 48.0f, 0.94f),
+                StructureSection("Chorus", 48.0f, 96.0f, 0.98f),
+                StructureSection("Breakdown", 96.0f, 124.0f, 0.91f),
+                StructureSection("Outro", 124.0f, 150.0f, 0.97f)
             )
 
             analysisDao.insertAnalysis(
                 AnalysisEntity(
-                    id = "demo-analysis-1",
+                    id = "demo-analysis-cybernetic",
                     projectId = project1Id,
-                    bpm = 126,
-                    musicKey = "F# Minor",
-                    genre = "Synthwave / Cinematic",
-                    mood = "Driving & Atmospheric",
-                    energy = 0.88f,
-                    lufs = -13.9f,
-                    duration = 214.5f,
+                    bpm = 122,
+                    musicKey = "E Minor",
+                    genre = "Cybernetic Funk / Electro",
+                    mood = "Punchy, Futuristic & Groovy",
+                    energy = 0.94f,
+                    lufs = -13.5f,
+                    duration = 150.0f,
                     structureJson = serializeStructure(structure),
-                    waveformCsv = AudioDemosData.DEMOS[0].peaks.joinToString(",")
+                    waveformCsv = AudioDemosData.MASTER_TRACK.peaks.joinToString(",")
                 )
             )
 
-            // Seed exports for project 1
+            // Seed exports for Cybernetic Groove
             exportDao.insertExport(
                 ExportEntity(
                     id = "exp-1",
                     projectId = project1Id,
                     typeCode = DeliverableType.EDIT_60.code,
-                    label = "60s Radio Edit",
-                    duration = 60.5f,
+                    label = "Cybernetic Groove (60s Radio Edit)",
+                    duration = 60.0f,
                     status = JobStatus.COMPLETE.name,
                     variation = 1,
                     creditCost = 2
@@ -344,8 +362,8 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
                     id = "exp-2",
                     projectId = project1Id,
                     typeCode = DeliverableType.EDIT_30.code,
-                    label = "30s Hook Edit",
-                    duration = 30.5f,
+                    label = "Cybernetic Groove (30s Hook Edit)",
+                    duration = 30.0f,
                     status = JobStatus.COMPLETE.name,
                     variation = 1,
                     creditCost = 2
@@ -356,8 +374,8 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
                     id = "exp-3",
                     projectId = project1Id,
                     typeCode = DeliverableType.EDIT_15.code,
-                    label = "15s Social Edit",
-                    duration = 15.4f,
+                    label = "Cybernetic Groove (15s Social Cut)",
+                    duration = 15.0f,
                     status = JobStatus.COMPLETE.name,
                     variation = 1,
                     creditCost = 2
@@ -368,11 +386,23 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
                     id = "exp-4",
                     projectId = project1Id,
                     typeCode = DeliverableType.STING.code,
-                    label = "Sting (5s)",
+                    label = "Cybernetic Groove (5s Sting)",
                     duration = 5.0f,
                     status = JobStatus.COMPLETE.name,
                     variation = 1,
                     creditCost = 1
+                )
+            )
+            exportDao.insertExport(
+                ExportEntity(
+                    id = "exp-5",
+                    projectId = project1Id,
+                    typeCode = DeliverableType.STEM_BASS.code,
+                    label = "Demucs Isolated Slap-Bass Stem",
+                    duration = 30.0f,
+                    status = JobStatus.COMPLETE.name,
+                    variation = 1,
+                    creditCost = 3
                 )
             )
 
@@ -392,7 +422,7 @@ class EditForgeRepository(private val database: EditForgeDatabase) {
                     id = "tx-core-bundle",
                     amount = -5,
                     reason = "Core Bundle Forge",
-                    description = "Unlocked 60s, 30s, 15s + Sting package for Neon Horizons",
+                    description = "Unlocked 60s, 30s, 15s + Sting package for Cybernetic Groove",
                     balanceAfter = 45,
                     timestamp = now - (2L * 24 * 3600 * 1000)
                 )

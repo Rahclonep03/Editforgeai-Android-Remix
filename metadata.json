@@ -1,6 +1,6 @@
 {
-  "name": "Remix editforge-ai-studio",
-  "description": "Imported from GitHub: Rahclonep03/editforge-ai-studio",
+  "name": "EditForge AI",
+  "description": "AI Audio & Master Cut-Down Studio - Instant 15s, 30s, and 60s broadcast deliverables",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

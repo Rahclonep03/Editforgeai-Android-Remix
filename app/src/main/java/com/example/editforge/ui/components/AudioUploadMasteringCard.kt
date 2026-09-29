@@ -45,11 +45,11 @@ data class QuickDemoAudio(
 
 val DASHBOARD_AUDIO_PRESETS = listOf(
     QuickDemoAudio(
-        title = "Neon Horizons - Electronic Master",
-        fileName = "neon_horizons_24b_48k.wav",
-        durationSeconds = 214.5f,
+        title = "Cybernetic Groove - Studio Master",
+        fileName = "Cybernetic Groove.wav",
+        durationSeconds = 150.0f,
         sampleRate = "48 kHz",
-        bitDepth = "24-bit PCM"
+        bitDepth = "24-bit WAV"
     ),
     QuickDemoAudio(
         title = "Midnight Drive - Synthwave Hook",

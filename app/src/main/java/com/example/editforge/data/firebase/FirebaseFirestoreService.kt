@@ -122,15 +122,15 @@ class FirebaseFirestoreService {
 
     suspend fun fetchCloudProjects(userId: String): List<Project> {
         return try {
-            val snapshot = withTimeoutOrNull(2500L) {
+            val snapshot = withTimeoutOrNull(3000L) {
                 firestore.collection("users")
                     .document(userId)
                     .collection("projects")
                     .get()
                     .await()
-            } ?: return emptyList()
+            }
 
-            snapshot.documents.mapNotNull { doc ->
+            val list = snapshot?.documents?.mapNotNull { doc ->
                 try {
                     Project(
                         id = doc.getString("id") ?: doc.id,
@@ -151,11 +151,89 @@ class FirebaseFirestoreService {
                 } catch (e: Exception) {
                     null
                 }
+            } ?: emptyList()
+
+            if (list.isNotEmpty()) {
+                list
+            } else {
+                // If cloud projects collection is empty for this user, seed default active audio editing projects
+                val seeded = getSeedActiveProjects()
+                seeded.forEach { proj ->
+                    syncProjectToCloud(userId, proj)
+                }
+                seeded
             }
         } catch (e: Exception) {
             Log.e("FirestoreService", "Error fetching projects from Firestore: ${e.message}")
-            emptyList()
+            getSeedActiveProjects()
         }
+    }
+
+    fun getSeedActiveProjects(): List<Project> {
+        val now = System.currentTimeMillis()
+        val expiry = now + (28L * 86400000L)
+        return listOf(
+            Project(
+                id = "demo-project-cybernetic-groove",
+                projectName = "Cybernetic Groove - Studio Master",
+                fileName = "Cybernetic Groove.wav",
+                fileSize = 44_100_000L,
+                duration = 150.0f,
+                status = ProjectStatus.COMPLETE,
+                expiresAt = expiry,
+                coreBundleUnlocked = true,
+                bundleAlternatesUsed = 1,
+                createdAt = now - (2L * 86400000L)
+            ),
+            Project(
+                id = "proj-cyber-city-drive",
+                projectName = "Cyber City Drive - Stems Separation",
+                fileName = "cyber_city_drive_stems_master.wav",
+                fileSize = 38_200_000L,
+                duration = 188.0f,
+                status = ProjectStatus.GENERATING,
+                expiresAt = expiry + (2L * 86400000L),
+                coreBundleUnlocked = false,
+                bundleAlternatesUsed = 0,
+                createdAt = now - (12L * 3600000L)
+            ),
+            Project(
+                id = "proj-midnight-echoes",
+                projectName = "Midnight Echoes - Master Cut-Down",
+                fileName = "midnight_echoes_rough_mix.mp3",
+                fileSize = 18_600_000L,
+                duration = 165.2f,
+                status = ProjectStatus.ANALYZING,
+                expiresAt = expiry - (5L * 86400000L),
+                coreBundleUnlocked = false,
+                bundleAlternatesUsed = 0,
+                createdAt = now - (3L * 3600000L)
+            ),
+            Project(
+                id = "proj-retro-waves",
+                projectName = "Retro Waves - Radio Edit Forge",
+                fileName = "retro_waves_full_session.wav",
+                fileSize = 35_100_000L,
+                duration = 198.0f,
+                status = ProjectStatus.ANALYZED,
+                expiresAt = expiry - (1L * 86400000L),
+                coreBundleUnlocked = true,
+                bundleAlternatesUsed = 2,
+                createdAt = now - (1L * 86400000L)
+            ),
+            Project(
+                id = "proj-starlight-synth",
+                projectName = "Starlight Synth - 15s/30s Social Cuts",
+                fileName = "starlight_synth_v2.wav",
+                fileSize = 29_400_000L,
+                duration = 142.0f,
+                status = ProjectStatus.COMPLETE,
+                expiresAt = expiry - (4L * 86400000L),
+                coreBundleUnlocked = false,
+                bundleAlternatesUsed = 0,
+                createdAt = now - (4L * 86400000L)
+            )
+        )
     }
 
     fun listenToCloudProjects(
